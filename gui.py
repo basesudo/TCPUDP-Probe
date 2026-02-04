@@ -7,7 +7,7 @@ import os
 from network import get_network_interfaces, NetworkInterface, TCPClient, TCPServer
 from utils import (
     bytes_to_hex, hex_to_bytes, is_valid_hex,
-    format_received_data, format_sent_data, HistoryManager
+    format_received_data, format_sent_data, HistoryManager, HistoryItem
 )
 
 # 配置文件路径
@@ -174,14 +174,16 @@ class TCPToolGUI:
         history_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(5, 0))
         
         ttk.Label(history_frame, text="历史:").pack(side=tk.LEFT, padx=(0, 5))
-        self.history_combo = ttk.Combobox(history_frame, state="readonly", width=30)
+        self.history_combo = ttk.Combobox(history_frame, state="readonly", width=35)
         self.history_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
         self.history_combo.bind('<<ComboboxSelected>>', self._on_history_select)
+        ttk.Button(history_frame, text="添加备注", command=self._add_remark).pack(side=tk.LEFT, padx=(0, 5))
         
         send_btn_frame = ttk.Frame(send_frame)
         send_btn_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(5, 0))
         
         ttk.Checkbutton(send_btn_frame, text="十六进制发送", variable=self.send_hex).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(send_btn_frame, text="发送并保存", command=self._send_and_save).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(send_btn_frame, text="发送", command=self._send_data).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(send_btn_frame, text="清空", command=self._clear_send).pack(side=tk.LEFT)
     
@@ -369,6 +371,9 @@ class TCPToolGUI:
                     for item in saved_history:
                         if isinstance(item, (list, tuple)) and len(item) == 2:
                             self.connection_history.append((item[0], int(item[1])))
+                    # 加载发送历史
+                    send_history = config.get('send_history', [])
+                    self.history_manager.from_list(send_history)
         except Exception as e:
             print(f"加载配置失败: {e}")
     
@@ -376,7 +381,8 @@ class TCPToolGUI:
         """保存配置到文件"""
         try:
             config = {
-                'connection_history': self.connection_history
+                'connection_history': self.connection_history,
+                'send_history': self.history_manager.to_list()
             }
             with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
@@ -405,15 +411,17 @@ class TCPToolGUI:
         self.receive_text.insert(tk.END, formatted)
         self.receive_text.see(tk.END)
     
-    def _send_data(self):
+    def _send_data(self, save_to_history: bool = False):
         """发送数据"""
         data_str = self.send_text.get("1.0", tk.END).strip()
         if not data_str:
             return
         
-        # 添加到历史
-        self.history_manager.add(data_str)
-        self._update_history_combo()
+        # 如果需要保存到历史
+        if save_to_history:
+            self.history_manager.add(data_str)
+            self._update_history_combo()
+            self._save_config()
         
         # 转换数据
         if self.send_hex.get():
@@ -442,16 +450,62 @@ class TCPToolGUI:
         else:
             messagebox.showerror("错误", "发送失败")
     
+    def _send_and_save(self):
+        """发送并保存到历史"""
+        self._send_data(save_to_history=True)
+    
     def _update_history_combo(self):
         """更新历史记录下拉框"""
-        self.history_combo['values'] = self.history_manager.get_all()
+        self.history_combo['values'] = self.history_manager.get_display_names()
     
     def _on_history_select(self, event):
         """选择历史记录"""
-        history = self.history_combo.get()
-        if history:
+        idx = self.history_combo.current()
+        item = self.history_manager.get_item(idx)
+        if item:
             self.send_text.delete("1.0", tk.END)
-            self.send_text.insert("1.0", history)
+            self.send_text.insert("1.0", item.data)
+    
+    def _add_remark(self):
+        """为选中的历史记录添加备注"""
+        idx = self.history_combo.current()
+        if idx < 0:
+            messagebox.showwarning("提示", "请先选择一条历史记录")
+            return
+        
+        item = self.history_manager.get_item(idx)
+        if not item:
+            return
+        
+        # 弹出输入对话框
+        dialog = tk.Toplevel(self.root)
+        dialog.title("添加备注")
+        dialog.geometry("300x120")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        ttk.Label(dialog, text="备注:").pack(pady=(10, 5))
+        remark_entry = ttk.Entry(dialog, width=35)
+        remark_entry.pack(pady=(0, 10))
+        remark_entry.insert(0, item.remark)
+        
+        def save_remark():
+            remark = remark_entry.get().strip()
+            item.remark = remark
+            self._update_history_combo()
+            self._save_config()
+            dialog.destroy()
+        
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(pady=5)
+        ttk.Button(btn_frame, text="确定", command=save_remark).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="取消", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
+        
+        # 居中显示
+        dialog.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() - dialog.winfo_width()) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - dialog.winfo_height()) // 2
+        dialog.geometry(f"+{x}+{y}")
     
     def _clear_receive(self):
         """清空接收区"""

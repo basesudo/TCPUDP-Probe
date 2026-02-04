@@ -66,23 +66,79 @@ def format_sent_data(data: bytes, show_hex: bool = False) -> str:
             return f"[{timestamp}] [发送] [二进制数据]\n{bytes_to_hex(data)}\n"
 
 
+class HistoryItem:
+    """历史记录项"""
+    def __init__(self, data: str, remark: str = ""):
+        self.data = data
+        self.remark = remark
+    
+    def __str__(self):
+        if self.remark:
+            return f"[{self.remark}] {self.data[:30]}{'...' if len(self.data) > 30 else ''}"
+        return self.data[:50] + ('...' if len(self.data) > 50 else '')
+    
+    def to_dict(self) -> dict:
+        return {"data": self.data, "remark": self.remark}
+    
+    @classmethod
+    def from_dict(cls, d: dict) -> "HistoryItem":
+        return cls(d.get("data", ""), d.get("remark", ""))
+
+
 class HistoryManager:
     """发送历史管理器"""
     def __init__(self, max_history: int = 50):
-        self.history: List[str] = []
+        self.history: List[HistoryItem] = []
         self.max_history = max_history
     
-    def add(self, data: str):
+    def add(self, data: str, remark: str = ""):
         """添加历史记录"""
-        if data and data not in self.history:
-            self.history.insert(0, data)
-            if len(self.history) > self.max_history:
-                self.history.pop()
+        if not data:
+            return
+        # 检查是否已存在相同数据
+        for item in self.history:
+            if item.data == data:
+                # 更新备注
+                if remark:
+                    item.remark = remark
+                # 移到最前面
+                self.history.remove(item)
+                self.history.insert(0, item)
+                return
+        
+        # 添加新记录
+        self.history.insert(0, HistoryItem(data, remark))
+        if len(self.history) > self.max_history:
+            self.history.pop()
     
-    def get_all(self) -> List[str]:
+    def get_all(self) -> List[HistoryItem]:
         """获取所有历史记录"""
         return self.history.copy()
+    
+    def get_display_names(self) -> List[str]:
+        """获取显示名称列表"""
+        return [str(item) for item in self.history]
+    
+    def get_item(self, index: int) -> Optional[HistoryItem]:
+        """获取指定索引的历史记录"""
+        if 0 <= index < len(self.history):
+            return self.history[index]
+        return None
     
     def clear(self):
         """清空历史记录"""
         self.history.clear()
+    
+    def to_list(self) -> List[dict]:
+        """转换为列表（用于序列化）"""
+        return [item.to_dict() for item in self.history]
+    
+    def from_list(self, data: List[dict]):
+        """从列表加载"""
+        self.history = []
+        for item in data:
+            if isinstance(item, dict) and "data" in item:
+                self.history.append(HistoryItem.from_dict(item))
+        # 限制数量
+        if len(self.history) > self.max_history:
+            self.history = self.history[:self.max_history]
