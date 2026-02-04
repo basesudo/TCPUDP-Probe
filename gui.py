@@ -1,12 +1,17 @@
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
 from typing import Optional, Tuple
+import json
+import os
 
 from network import get_network_interfaces, NetworkInterface, TCPClient, TCPServer
 from utils import (
     bytes_to_hex, hex_to_bytes, is_valid_hex,
     format_received_data, format_sent_data, HistoryManager
 )
+
+# 配置文件路径
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
 
 class TCPToolGUI:
@@ -29,6 +34,7 @@ class TCPToolGUI:
         self.send_hex = tk.BooleanVar(value=False)
         self.selected_client: Optional[Tuple[str, int]] = None
         self.history_manager = HistoryManager()
+        self.connection_history: list[tuple[str, int]] = []  # 连接历史 (ip, port)
         
         # 设置回调
         self.tcp_client.on_data_received = self._on_client_data
@@ -37,8 +43,14 @@ class TCPToolGUI:
         self.tcp_server.on_client_disconnected = self._on_server_client_disconnected
         self.tcp_server.on_data_received = self._on_server_data
         
+        # 加载配置
+        self._load_config()
+        
         self._create_widgets()
         self._refresh_interfaces()
+        
+        # 更新连接历史显示
+        self._update_connection_history_combo()
     
     def _create_widgets(self):
         """创建界面组件"""
@@ -80,21 +92,29 @@ class TCPToolGUI:
         self.client_config_frame = ttk.Frame(self.config_frame)
         self.client_config_frame.grid(row=0, column=0, sticky=(tk.W, tk.E))
         
-        ttk.Label(self.client_config_frame, text="目标IP:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        # 历史连接选择
+        ttk.Label(self.client_config_frame, text="历史:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        self.conn_history_combo = ttk.Combobox(self.client_config_frame, state="readonly", width=20)
+        self.conn_history_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
+        self.conn_history_combo.bind('<<ComboboxSelected>>', self._on_connection_history_select)
+        
+        ttk.Label(self.client_config_frame, text="目标IP:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5), pady=(5, 0))
         self.target_ip_entry = ttk.Entry(self.client_config_frame, width=15)
-        self.target_ip_entry.grid(row=0, column=1, padx=(0, 10))
+        self.target_ip_entry.grid(row=1, column=1, padx=(0, 10), pady=(5, 0), sticky=tk.W)
         self.target_ip_entry.insert(0, "127.0.0.1")
         
-        ttk.Label(self.client_config_frame, text="端口:").grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
+        ttk.Label(self.client_config_frame, text="端口:").grid(row=1, column=2, sticky=tk.W, padx=(0, 5), pady=(5, 0))
         self.target_port_entry = ttk.Entry(self.client_config_frame, width=8)
-        self.target_port_entry.grid(row=0, column=3, padx=(0, 10))
+        self.target_port_entry.grid(row=1, column=3, padx=(0, 10), pady=(5, 0), sticky=tk.W)
         self.target_port_entry.insert(0, "8080")
         
+        ttk.Button(self.client_config_frame, text="保存", command=self._save_connection).grid(row=1, column=4, padx=(0, 10), pady=(5, 0))
+        
         self.connect_btn = ttk.Button(self.client_config_frame, text="连接", command=self._toggle_client_connection)
-        self.connect_btn.grid(row=0, column=4, padx=(0, 10))
+        self.connect_btn.grid(row=1, column=5, padx=(0, 10), pady=(5, 0))
         
         self.client_status_label = ttk.Label(self.client_config_frame, text="未连接", foreground="red")
-        self.client_status_label.grid(row=0, column=5)
+        self.client_status_label.grid(row=1, column=6, pady=(5, 0))
         
         # 服务器模式配置
         self.server_config_frame = ttk.Frame(self.config_frame)
@@ -297,6 +317,81 @@ class TCPToolGUI:
             client_str = self.client_listbox.get(selection[0])
             ip, port = client_str.rsplit(":", 1)
             self.selected_client = (ip, int(port))
+    
+    def _save_connection(self):
+        """保存当前连接配置到历史"""
+        ip = self.target_ip_entry.get().strip()
+        port_str = self.target_port_entry.get().strip()
+        
+        if not ip or not port_str:
+            messagebox.showwarning("提示", "请先填写目标IP和端口")
+            return
+        
+        try:
+            port = int(port_str)
+        except ValueError:
+            messagebox.showerror("错误", "端口必须是数字")
+            return
+        
+        # 检查是否已存在
+        conn = (ip, port)
+        if conn in self.connection_history:
+            self.connection_history.remove(conn)
+        
+        # 添加到历史开头
+        self.connection_history.insert(0, conn)
+        
+        # 限制历史数量
+        if len(self.connection_history) > 20:
+            self.connection_history = self.connection_history[:20]
+        
+        self._update_connection_history_combo()
+        
+        # 保存到配置文件
+        self._save_config()
+        
+        messagebox.showinfo("成功", f"已保存连接: {ip}:{port}")
+    
+    def _update_connection_history_combo(self):
+        """更新连接历史下拉框"""
+        history_names = [f"{ip}:{port}" for ip, port in self.connection_history]
+        self.conn_history_combo['values'] = history_names
+    
+    def _load_config(self):
+        """从配置文件加载连接历史"""
+        try:
+            if os.path.exists(CONFIG_FILE):
+                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    # 加载连接历史
+                    saved_history = config.get('connection_history', [])
+                    self.connection_history = []
+                    for item in saved_history:
+                        if isinstance(item, (list, tuple)) and len(item) == 2:
+                            self.connection_history.append((item[0], int(item[1])))
+        except Exception as e:
+            print(f"加载配置失败: {e}")
+    
+    def _save_config(self):
+        """保存配置到文件"""
+        try:
+            config = {
+                'connection_history': self.connection_history
+            }
+            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"保存配置失败: {e}")
+    
+    def _on_connection_history_select(self, event):
+        """选择历史连接"""
+        idx = self.conn_history_combo.current()
+        if idx >= 0 and idx < len(self.connection_history):
+            ip, port = self.connection_history[idx]
+            self.target_ip_entry.delete(0, tk.END)
+            self.target_ip_entry.insert(0, ip)
+            self.target_port_entry.delete(0, tk.END)
+            self.target_port_entry.insert(0, str(port))
     
     def _append_receive(self, data: bytes, from_server: bool = False, client_addr: Optional[Tuple[str, int]] = None):
         """追加接收数据到显示区"""
