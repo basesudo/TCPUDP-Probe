@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TCP调试工具 - Web版</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .panel {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .panel-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        .form-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .form-row label {
+            min-width: 80px;
+            color: #555;
+        }
+        select, input[type="text"], input[type="number"] {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        select {
+            min-width: 250px;
+        }
+        input[type="text"], input[type="number"] {
+            min-width: 150px;
+        }
+        button {
+            padding: 8px 16px;
+            background: #1890ff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #40a9ff;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        button.secondary {
+            background: #52c41a;
+        }
+        button.secondary:hover {
+            background: #73d13d;
+        }
+        button.danger {
+            background: #ff4d4f;
+        }
+        button.danger:hover {
+            background: #ff7875;
+        }
+        .status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+            margin-left: 10px;
+        }
+        .status.connected {
+            background: #f6ffed;
+            color: #52c41a;
+            border: 1px solid #b7eb8f;
+        }
+        .status.disconnected {
+            background: #fff1f0;
+            color: #ff4d4f;
+            border: 1px solid #ffa39e;
+        }
+        .mode-selector {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 15px;
+        }
+        .mode-selector label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+        }
+        .mode-selector input {
+            margin-right: 5px;
+        }
+        .data-area {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        @media (max-width: 900px) {
+            .data-area {
+                grid-template-columns: 1fr;
+            }
+        }
+        textarea {
+            width: 100%;
+            min-height: 200px;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            resize: vertical;
+        }
+        .checkbox-group {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 10px;
+        }
+        .checkbox-group label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+        }
+        .checkbox-group input {
+            margin-right: 5px;
+        }
+        .history-list {
+            max-height: 150px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 5px;
+        }
+        .history-item {
+            padding: 8px 12px;
+            cursor: pointer;
+            border-bottom: 1px solid #f0f0f0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .history-item:hover {
+            background: #f5f5f5;
+        }
+        .history-item:last-child {
+            border-bottom: none;
+        }
+        .remark {
+            color: #1890ff;
+            font-size: 12px;
+        }
+        .client-list {
+            max-height: 100px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 5px;
+            margin-top: 10px;
+        }
+        .client-item {
+            padding: 5px 10px;
+            cursor: pointer;
+        }
+        .client-item:hover {
+            background: #f5f5f5;
+        }
+        .client-item.selected {
+            background: #e6f7ff;
+        }
+        #receiveArea {
+            background: #fafafa;
+        }
+        .error {
+            color: #ff4d4f;
+            padding: 10px;
+            background: #fff1f0;
+            border: 1px solid #ffa39e;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 TCP调试工具 - Web版</h1>
+        
+        <!-- 网络配置 -->
+        <div class="panel">
+            <div class="panel-title">网络配置</div>
+            <div class="form-row">
+                <label>网卡/IP:</label>
+                <select id="interfaceSelect">
+                    <option value="">请选择网卡</option>
+                </select>
+                <button onclick="refreshInterfaces()">刷新</button>
+            </div>
+            <div class="mode-selector">
+                <label>
+                    <input type="radio" name="mode" value="client" checked onchange="switchMode()">
+                    客户端模式
+                </label>
+                <label>
+                    <input type="radio" name="mode" value="server" onchange="switchMode()">
+                    服务器模式
+                </label>
+            </div>
+        </div>
+        
+        <!-- 连接配置 -->
+        <div class="panel">
+            <div class="panel-title">连接配置</div>
+            
+            <!-- 客户端模式 -->
+            <div id="clientConfig">
+                <div class="form-row">
+                    <label>历史:</label>
+                    <select id="connHistorySelect" onchange="onConnectionHistorySelect()">
+                        <option value="">选择历史连接</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label>目标IP:</label>
+                    <input type="text" id="targetIp" placeholder="127.0.0.1" value="127.0.0.1">
+                    <label>端口:</label>
+                    <input type="number" id="targetPort" placeholder="8080" value="8080">
+                    <button onclick="saveConnection()">保存</button>
+                    <button id="connectBtn" onclick="toggleConnection()">连接</button>
+                    <span id="clientStatus" class="status disconnected">未连接</span>
+                </div>
+            </div>
+            
+            <!-- 服务器模式 -->
+            <div id="serverConfig" style="display: none;">
+                <div class="form-row">
+                    <label>监听端口:</label>
+                    <input type="number" id="listenPort" placeholder="8080" value="8080">
+                    <button id="serverBtn" onclick="toggleServer()">启动服务器</button>
+                    <span id="serverStatus" class="status disconnected">未启动</span>
+                </div>
+                <div id="clientListContainer" style="display: none;">
+                    <label>已连接客户端:</label>
+                    <div id="clientList" class="client-list"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 数据收发 -->
+        <div class="data-area">
+            <!-- 接收区 -->
+            <div class="panel">
+                <div class="panel-title">接收数据</div>
+                <div class="checkbox-group">
+                    <label>
+                        <input type="checkbox" id="showHex" checked> 十六进制显示
+                    </label>
+                </div>
+                <textarea id="receiveArea" readonly placeholder="接收到的数据将显示在这里..."></textarea>
+                <div class="form-row">
+                    <button onclick="clearReceive()">清空</button>
+                </div>
+            </div>
+            
+            <!-- 发送区 -->
+            <div class="panel">
+                <div class="panel-title">发送数据</div>
+                <div class="checkbox-group">
+                    <label>
+                        <input type="checkbox" id="sendHex" checked> 十六进制发送
+                    </label>
+                    <label>
+                        <input type="checkbox" id="saveHistory"> 保存到历史
+                    </label>
+                </div>
+                <textarea id="sendArea" placeholder="输入要发送的数据..."></textarea>
+                <div class="form-row">
+                    <button class="secondary" onclick="sendData()">发送</button>
+                    <button onclick="clearSend()">清空</button>
+                </div>
+                
+                <!-- 发送历史 -->
+                <div style="margin-top: 15px;">
+                    <div class="panel-title" style="font-size: 14px;">发送历史</div>
+                    <div id="historyList" class="history-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Socket.IO连接
+        const socket = io();
+        
+        // 状态
+        let isConnected = false;
+        let isServerRunning = false;
+        let selectedClient = null;
+        let connectionHistory = [];
+        let sendHistory = [];
+        
+        // 连接成功
+        socket.on('connect', function() {
+            console.log('Connected to server');
+        });
+        
+        // 网卡列表
+        socket.on('interfaces', function(interfaces) {
+            console.log('Received interfaces:', interfaces);
+            const select = document.getElementById('interfaceSelect');
+            select.innerHTML = '<option value="">请选择网卡</option>';
+            if (interfaces && interfaces.length > 0) {
+                interfaces.forEach(function(iface) {
+                    const option = document.createElement('option');
+                    option.value = iface.ip;
+                    option.textContent = `${iface.name} (${iface.ip})`;
+                    select.appendChild(option);
+                });
+                select.selectedIndex = 1;
+            } else {
+                console.warn('No interfaces received');
+            }
+        });
+        
+        // 连接历史
+        socket.on('connection_history', function(history) {
+            connectionHistory = history;
+            updateConnectionHistorySelect();
+        });
+        
+        // 发送历史
+        socket.on('send_history', function(history) {
+            sendHistory = history;
+            updateSendHistoryList();
+        });
+        
+        // 连接状态
+        socket.on('connection_status', function(status) {
+            isConnected = status.connected;
+            const btn = document.getElementById('connectBtn');
+            const statusSpan = document.getElementById('clientStatus');
+            
+            if (isConnected) {
+                btn.textContent = '断开';
+                btn.className = 'danger';
+                statusSpan.textContent = '已连接';
+                statusSpan.className = 'status connected';
+            } else {
+                btn.textContent = '连接';
+                btn.className = '';
+                statusSpan.textContent = '未连接';
+                statusSpan.className = 'status disconnected';
+            }
+        });
+        
+        // 服务器状态
+        socket.on('server_status', function(status) {
+            isServerRunning = status.running;
+            const btn = document.getElementById('serverBtn');
+            const statusSpan = document.getElementById('serverStatus');
+            const clientListContainer = document.getElementById('clientListContainer');
+            
+            if (isServerRunning) {
+                btn.textContent = '停止服务器';
+                btn.className = 'danger';
+                statusSpan.textContent = '运行中 ' + (status.address || '');
+                statusSpan.className = 'status connected';
+                clientListContainer.style.display = 'block';
+            } else {
+                btn.textContent = '启动服务器';
+                btn.className = '';
+                statusSpan.textContent = '未启动';
+                statusSpan.className = 'status disconnected';
+                clientListContainer.style.display = 'none';
+                document.getElementById('clientList').innerHTML = '';
+            }
+        });
+        
+        // 接收数据
+        socket.on('receive_data', function(data) {
+            const area = document.getElementById('receiveArea');
+            let text = data.data;
+            if (data.from) {
+                text = `[来自 ${data.from}]\n${text}`;
+            }
+            area.value += text;
+            area.scrollTop = area.scrollHeight;
+        });
+        
+        // 发送成功
+        socket.on('send_success', function(data) {
+            const area = document.getElementById('receiveArea');
+            area.value += data.data;
+            area.scrollTop = area.scrollHeight;
+        });
+        
+        // 服务器客户端连接
+        socket.on('server_client_connected', function(data) {
+            updateClientList();
+        });
+        
+        // 服务器客户端断开
+        socket.on('server_client_disconnected', function(data) {
+            updateClientList();
+        });
+        
+        // 错误
+        socket.on('error', function(data) {
+            alert('错误: ' + data.message);
+        });
+        
+        // 刷新网卡
+        function refreshInterfaces() {
+            socket.emit('get_interfaces');
+        }
+        
+        // 切换模式
+        function switchMode() {
+            const mode = document.querySelector('input[name="mode"]:checked').value;
+            document.getElementById('clientConfig').style.display = mode === 'client' ? 'block' : 'none';
+            document.getElementById('serverConfig').style.display = mode === 'server' ? 'block' : 'none';
+        }
+        
+        // 更新连接历史下拉框
+        function updateConnectionHistorySelect() {
+            const select = document.getElementById('connHistorySelect');
+            select.innerHTML = '<option value="">选择历史连接</option>';
+            connectionHistory.forEach(function(conn, index) {
+                const option = document.createElement('option');
+                option.value = index;
+                option.textContent = `${conn[0]}:${conn[1]}`;
+                select.appendChild(option);
+            });
+        }
+        
+        // 选择连接历史
+        function onConnectionHistorySelect() {
+            const select = document.getElementById('connHistorySelect');
+            const index = parseInt(select.value);
+            if (index >= 0 && index < connectionHistory.length) {
+                const conn = connectionHistory[index];
+                
+                // 如果已连接，确认切换
+                if (isConnected) {
+                    const currentIp = document.getElementById('targetIp').value;
+                    const currentPort = document.getElementById('targetPort').value;
+                    if (!confirm(`当前已连接到 ${currentIp}:${currentPort}\n是否断开并连接到 ${conn[0]}:${conn[1]}?`)) {
+                        return;
+                    }
+                    toggleConnection(); // 断开当前连接
+                }
+                
+                document.getElementById('targetIp').value = conn[0];
+                document.getElementById('targetPort').value = conn[1];
+                
+                // 自动连接
+                setTimeout(toggleConnection, 100);
+            }
+        }
+        
+        // 保存连接
+        function saveConnection() {
+            const ip = document.getElementById('targetIp').value.trim();
+            const port = parseInt(document.getElementById('targetPort').value);
+            
+            if (!ip || !port) {
+                alert('请先填写目标IP和端口');
+                return;
+            }
+            
+            socket.emit('save_connection', {ip: ip, port: port});
+        }
+        
+        // 切换连接
+        function toggleConnection() {
+            if (isConnected) {
+                socket.emit('client_disconnect');
+            } else {
+                const ip = document.getElementById('targetIp').value.trim();
+                const port = parseInt(document.getElementById('targetPort').value);
+                const sourceIp = document.getElementById('interfaceSelect').value || '0.0.0.0';
+                
+                if (!ip || !port) {
+                    alert('请填写目标IP和端口');
+                    return;
+                }
+                
+                socket.emit('client_connect', {ip: ip, port: port, source_ip: sourceIp});
+            }
+        }
+        
+        // 切换服务器
+        function toggleServer() {
+            if (isServerRunning) {
+                socket.emit('server_stop');
+            } else {
+                const port = parseInt(document.getElementById('listenPort').value);
+                const bindIp = document.getElementById('interfaceSelect').value || '0.0.0.0';
+                
+                if (!port) {
+                    alert('请填写监听端口');
+                    return;
+                }
+                
+                socket.emit('server_start', {bind_ip: bindIp, port: port});
+            }
+        }
+        
+        // 更新客户端列表
+        function updateClientList() {
+            // 这里简化处理，实际应该从服务器获取客户端列表
+        }
+        
+        // 发送数据
+        function sendData() {
+            const data = document.getElementById('sendArea').value.trim();
+            const isHex = document.getElementById('sendHex').checked;
+            const saveToHistory = document.getElementById('saveHistory').checked;
+            
+            if (!data) {
+                alert('请输入要发送的数据');
+                return;
+            }
+            
+            socket.emit('send_data', {
+                data: data,
+                is_hex: isHex,
+                save_history: saveToHistory,
+                target_client: selectedClient
+            });
+        }
+        
+        // 更新发送历史列表
+        function updateSendHistoryList() {
+            const container = document.getElementById('historyList');
+            container.innerHTML = '';
+            
+            sendHistory.forEach(function(item, index) {
+                const div = document.createElement('div');
+                div.className = 'history-item';
+                
+                const text = document.createElement('span');
+                if (item.remark) {
+                    text.innerHTML = `<span class="remark">[${item.remark}]</span> ${item.data.substring(0, 30)}${item.data.length > 30 ? '...' : ''}`;
+                } else {
+                    text.textContent = item.data.substring(0, 50) + (item.data.length > 50 ? '...' : '');
+                }
+                
+                const remarkBtn = document.createElement('button');
+                remarkBtn.textContent = '备注';
+                remarkBtn.style.padding = '2px 8px';
+                remarkBtn.style.fontSize = '12px';
+                remarkBtn.onclick = function(e) {
+                    e.stopPropagation();
+                    addRemark(index);
+                };
+                
+                div.appendChild(text);
+                div.appendChild(remarkBtn);
+                
+                div.onclick = function() {
+                    document.getElementById('sendArea').value = item.data;
+                };
+                
+                container.appendChild(div);
+            });
+        }
+        
+        // 添加备注
+        function addRemark(index) {
+            const remark = prompt('请输入备注:');
+            if (remark !== null) {
+                socket.emit('update_remark', {index: index, remark: remark});
+            }
+        }
+        
+        // 清空接收区
+        function clearReceive() {
+            document.getElementById('receiveArea').value = '';
+        }
+        
+        // 清空发送区
+        function clearSend() {
+            document.getElementById('sendArea').value = '';
+        }
+    </script>
+</body>
+</html>
