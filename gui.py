@@ -30,8 +30,8 @@ class TCPToolGUI:
         
         # 状态
         self.is_server_mode = False
-        self.show_hex = tk.BooleanVar(value=False)
-        self.send_hex = tk.BooleanVar(value=False)
+        self.show_hex = tk.BooleanVar(value=True)
+        self.send_hex = tk.BooleanVar(value=True)
         self.selected_client: Optional[Tuple[str, int]] = None
         self.history_manager = HistoryManager()
         self.connection_history: list[tuple[str, int]] = []  # 连接历史 (ip, port)
@@ -51,6 +51,9 @@ class TCPToolGUI:
         
         # 更新连接历史显示
         self._update_connection_history_combo()
+        
+        # 更新发送历史显示
+        self._update_history_combo()
     
     def _create_widgets(self):
         """创建界面组件"""
@@ -390,14 +393,28 @@ class TCPToolGUI:
             print(f"保存配置失败: {e}")
     
     def _on_connection_history_select(self, event):
-        """选择历史连接"""
+        """选择历史连接并自动连接"""
         idx = self.conn_history_combo.current()
         if idx >= 0 and idx < len(self.connection_history):
             ip, port = self.connection_history[idx]
+            
+            # 如果当前已连接，弹出确认框
+            if self.tcp_client.connected:
+                current_ip = self.target_ip_entry.get().strip()
+                current_port = self.target_port_entry.get().strip()
+                if messagebox.askyesno("确认切换", f"当前已连接到 {current_ip}:{current_port}\n是否断开并连接到 {ip}:{port}?"):
+                    # 断开当前连接
+                    self._toggle_client_connection()
+                else:
+                    return
+            
             self.target_ip_entry.delete(0, tk.END)
             self.target_ip_entry.insert(0, ip)
             self.target_port_entry.delete(0, tk.END)
             self.target_port_entry.insert(0, str(port))
+            
+            # 自动连接
+            self._toggle_client_connection()
     
     def _append_receive(self, data: bytes, from_server: bool = False, client_addr: Optional[Tuple[str, int]] = None):
         """追加接收数据到显示区"""
