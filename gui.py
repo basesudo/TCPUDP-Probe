@@ -45,6 +45,7 @@ class TCPToolGUI:
         self.is_server_mode = False
         self.protocol_mode = tk.StringVar(value="TCP")  # TCP/UDP
         self.show_hex = tk.BooleanVar(value=True)
+        self.show_binary = tk.BooleanVar(value=False)  # 二进制显示
         self.send_hex = tk.BooleanVar(value=True)
         self.selected_client: Optional[Tuple[str, int]] = None
         self.history_manager = HistoryManager()
@@ -188,6 +189,7 @@ class TCPToolGUI:
         receive_btn_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(5, 0))
         
         ttk.Checkbutton(receive_btn_frame, text="十六进制显示", variable=self.show_hex).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Checkbutton(receive_btn_frame, text="二进制显示", variable=self.show_binary).pack(side=tk.LEFT, padx=(0, 10))
         ttk.Button(receive_btn_frame, text="清空", command=self._clear_receive).pack(side=tk.LEFT)
         ttk.Button(receive_btn_frame, text="保存", command=self._save_receive).pack(side=tk.LEFT, padx=(5, 0))
         
@@ -603,7 +605,7 @@ class TCPToolGUI:
             prefix = f"[来自 {client_addr[0]}:{client_addr[1]}] "
             self.receive_text.insert(tk.END, prefix)
         
-        formatted = format_received_data(data, show_hex)
+        formatted = format_received_data(data, show_hex, self.show_binary.get())
         self.receive_text.insert(tk.END, formatted)
         self.receive_text.see(tk.END)
     
@@ -652,7 +654,7 @@ class TCPToolGUI:
                 success = self.udp_client.send(data)
         
         if success:
-            formatted = format_sent_data(data, self.show_hex.get())
+            formatted = format_sent_data(data, self.show_hex.get(), self.show_binary.get())
             self.receive_text.insert(tk.END, formatted)
             self.receive_text.see(tk.END)
         else:
@@ -769,14 +771,14 @@ class TCPToolGUI:
     def _on_udp_client_data(self, ip: str, port: int, data: bytes):
         """UDP客户端接收数据"""
         show_hex = self.show_hex.get()
-        formatted = format_received_data(data, show_hex)
+        formatted = format_received_data(data, show_hex, self.show_binary.get())
         self.receive_text.insert(tk.END, f"[来自 {ip}:{port}]\n{formatted}")
         self.receive_text.see(tk.END)
     
     def _on_udp_server_data(self, ip: str, port: int, data: bytes):
         """UDP服务器接收数据"""
         show_hex = self.show_hex.get()
-        formatted = format_received_data(data, show_hex)
+        formatted = format_received_data(data, show_hex, self.show_binary.get())
         self.receive_text.insert(tk.END, f"[来自 {ip}:{port}]\n{formatted}")
         self.receive_text.see(tk.END)
         

@@ -84,10 +84,25 @@ def get_timestamp() -> str:
     return datetime.now().strftime('%H:%M:%S.%f')[:-3]
 
 
-def format_received_data(data: bytes, show_hex: bool = False) -> str:
+def bytes_to_binary(data: bytes, bytes_per_line: int = 8) -> str:
+    """将字节转换为二进制字符串"""
+    lines = []
+    for i in range(0, len(data), bytes_per_line):
+        chunk = data[i:i + bytes_per_line]
+        # 二进制表示
+        binary_part = ' '.join(f'{b:08b}' for b in chunk)
+        # 十六进制表示（作为参考）
+        hex_part = ' '.join(f'{b:02X}' for b in chunk)
+        lines.append(f'{i:04X}  {binary_part}  |  {hex_part}')
+    return '\n'.join(lines)
+
+
+def format_received_data(data: bytes, show_hex: bool = False, show_binary: bool = False) -> str:
     """格式化接收到的数据"""
     timestamp = get_timestamp()
-    if show_hex:
+    if show_binary:
+        return f"[{timestamp}] [二进制]\n{bytes_to_binary(data)}\n"
+    elif show_hex:
         return f"[{timestamp}]\n{bytes_to_hex(data)}\n"
     else:
         try:
@@ -97,10 +112,12 @@ def format_received_data(data: bytes, show_hex: bool = False) -> str:
             return f"[{timestamp}] [二进制数据]\n{bytes_to_hex(data)}\n"
 
 
-def format_sent_data(data: bytes, show_hex: bool = False) -> str:
+def format_sent_data(data: bytes, show_hex: bool = False, show_binary: bool = False) -> str:
     """格式化发送的数据"""
     timestamp = get_timestamp()
-    if show_hex:
+    if show_binary:
+        return f"[{timestamp}] [发送] [二进制]\n{bytes_to_binary(data)}\n"
+    elif show_hex:
         return f"[{timestamp}] [发送]\n{bytes_to_hex(data)}\n"
     else:
         try:
