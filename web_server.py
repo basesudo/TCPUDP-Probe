@@ -7,6 +7,7 @@ from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit
 import json
 import os
+import sys
 from typing import Optional, Tuple
 
 from network import get_network_interfaces, NetworkInterface, TCPClient, TCPServer, UDPClient, UDPServer
@@ -15,14 +16,24 @@ from utils import (
     format_received_data, format_sent_data, HistoryManager
 )
 
-app = Flask(__name__)
+# 获取程序运行目录（支持打包后的exe）
+def get_app_dir():
+    """获取应用程序目录"""
+    if getattr(sys, 'frozen', False):
+        # 打包后的exe运行
+        return os.path.dirname(sys.executable)
+    else:
+        # 直接运行py文件
+        return os.path.dirname(os.path.abspath(__file__))
+
+app = Flask(__name__, template_folder=os.path.join(get_app_dir(), 'templates'))
 app.config['SECRET_KEY'] = 'tcp-tool-secret'
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # 配置文件路径
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+CONFIG_FILE = os.path.join(get_app_dir(), "config.json")
 
 # 全局状态
 class AppState:
@@ -100,14 +111,6 @@ app_state = AppState()
 @app.route('/')
 def index():
     """主页面"""
-    import os
-    template_path = os.path.join(app.root_path, 'templates', 'index.html')
-    print(f"Loading template from: {template_path}")
-    print(f"Template exists: {os.path.exists(template_path)}")
-    with open(template_path, 'r', encoding='utf-8') as f:
-        content = f.read()
-    print(f"Template size: {len(content)} bytes")
-    print(f"Title in template: {content[content.find('<title>'):content.find('</title>')+8]}")
     return render_template('index.html')
 
 @socketio.on('connect')

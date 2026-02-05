@@ -3,6 +3,7 @@ from tkinter import ttk, scrolledtext, messagebox
 from typing import Optional, Tuple
 import json
 import os
+import sys
 
 from network import get_network_interfaces, NetworkInterface, TCPClient, TCPServer, UDPClient, UDPServer
 from utils import (
@@ -10,8 +11,18 @@ from utils import (
     format_received_data, format_sent_data, HistoryManager, HistoryItem
 )
 
+# 获取程序运行目录（支持打包后的exe）
+def get_app_dir():
+    """获取应用程序目录"""
+    if getattr(sys, 'frozen', False):
+        # 打包后的exe运行
+        return os.path.dirname(sys.executable)
+    else:
+        # 直接运行py文件
+        return os.path.dirname(os.path.abspath(__file__))
+
 # 配置文件路径
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+CONFIG_FILE = os.path.join(get_app_dir(), "config.json")
 
 
 class TCPToolGUI:
@@ -19,7 +30,7 @@ class TCPToolGUI:
     
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("TCP调试工具")
+        self.root.title("TCP/UDP 调试工具")
         self.root.geometry("1000x700")
         self.root.minsize(800, 600)
         
