@@ -124,7 +124,8 @@ class TCPToolGUI:
         self.conn_history_combo = ttk.Combobox(self.client_config_frame, state="readonly", width=35)
         self.conn_history_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 5))
         self.conn_history_combo.bind('<<ComboboxSelected>>', self._on_connection_history_select)
-        ttk.Button(self.client_config_frame, text="备注", width=4, command=self._add_connection_remark).grid(row=0, column=2, padx=(0, 10))
+        ttk.Button(self.client_config_frame, text="备注", width=4, command=self._add_connection_remark).grid(row=0, column=2, padx=(0, 5))
+        ttk.Button(self.client_config_frame, text="删除", width=4, command=self._delete_connection_history_item).grid(row=0, column=3, padx=(0, 10))
         
         ttk.Label(self.client_config_frame, text="目标IP:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5), pady=(5, 0))
         self.target_ip_entry = ttk.Entry(self.client_config_frame, width=20)
@@ -204,10 +205,11 @@ class TCPToolGUI:
         history_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(5, 0))
         
         ttk.Label(history_frame, text="历史:").pack(side=tk.LEFT, padx=(0, 5))
-        self.history_combo = ttk.Combobox(history_frame, state="readonly", width=30)
+        self.history_combo = ttk.Combobox(history_frame, state="readonly", width=28)
         self.history_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
         self.history_combo.bind('<<ComboboxSelected>>', self._on_history_select)
         ttk.Button(history_frame, text="备注", width=4, command=self._add_remark).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(history_frame, text="删除", width=4, command=self._delete_history_item).pack(side=tk.LEFT, padx=(0, 5))
         
         send_btn_frame = ttk.Frame(send_frame)
         send_btn_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(5, 0))
@@ -573,6 +575,26 @@ class TCPToolGUI:
         ttk.Button(btn_frame, text="确定", command=save_remark).pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="取消", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
     
+    def _delete_connection_history_item(self):
+        """删除选中的连接历史记录"""
+        idx = self.conn_history_combo.current()
+        if idx < 0:
+            messagebox.showwarning("提示", "请先选择一条历史记录")
+            return
+        
+        history_list = self.udp_connection_history if self.protocol_mode.get() == "UDP" else self.connection_history
+        if idx >= len(history_list):
+            return
+        
+        item = history_list[idx]
+        if messagebox.askyesno("确认删除", f"确定要删除连接 {item['ip']}:{item['port']} 吗？"):
+            history_list.pop(idx)
+            self._update_connection_history_combo()
+            self._save_config()
+            # 清空输入框
+            self.target_ip_entry.delete(0, tk.END)
+            self.target_port_entry.delete(0, tk.END)
+    
     def _append_receive(self, data: bytes, from_server: bool = False, client_addr: Optional[Tuple[str, int]] = None):
         """追加接收数据到显示区"""
         show_hex = self.show_hex.get()
@@ -692,6 +714,20 @@ class TCPToolGUI:
         x = self.root.winfo_x() + (self.root.winfo_width() - dialog.winfo_width()) // 2
         y = self.root.winfo_y() + (self.root.winfo_height() - dialog.winfo_height()) // 2
         dialog.geometry(f"+{x}+{y}")
+    
+    def _delete_history_item(self):
+        """删除选中的发送历史记录"""
+        idx = self.history_combo.current()
+        if idx < 0:
+            messagebox.showwarning("提示", "请先选择一条历史记录")
+            return
+        
+        if messagebox.askyesno("确认删除", "确定要删除这条历史记录吗？"):
+            self.history_manager.delete_item(idx)
+            self._update_history_combo()
+            self._save_config()
+            # 清空发送区
+            self.send_text.delete("1.0", tk.END)
     
     def _clear_receive(self):
         """清空接收区"""
