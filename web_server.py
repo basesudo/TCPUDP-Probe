@@ -9,7 +9,7 @@ import json
 import os
 from typing import Optional, Tuple
 
-from network import get_network_interfaces, NetworkInterface, TCPClient, TCPServer
+from network import get_network_interfaces, NetworkInterface, TCPClient, TCPServer, UDPClient, UDPServer
 from utils import (
     bytes_to_hex, hex_to_bytes, is_valid_hex,
     format_received_data, format_sent_data, HistoryManager
@@ -17,6 +17,8 @@ from utils import (
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'tcp-tool-secret'
+app.config['TEMPLATES_AUTO_RELOAD'] = True
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # 配置文件路径
@@ -27,7 +29,10 @@ class AppState:
     def __init__(self):
         self.tcp_client = TCPClient()
         self.tcp_server = TCPServer()
+        self.udp_client = UDPClient()
+        self.udp_server = UDPServer()
         self.connection_history: list[tuple[str, int]] = []
+        self.udp_connection_history: list[tuple[str, int]] = []
         self.history_manager = HistoryManager()
         self.current_client_sid: Optional[str] = None
         self._setup_callbacks()
@@ -39,6 +44,8 @@ class AppState:
         self.tcp_server.on_client_connected = self._on_server_client_connected
         self.tcp_server.on_client_disconnected = self._on_server_client_disconnected
         self.tcp_server.on_data_received = self._on_server_data
+        self.udp_client.on_data_received = self._on_udp_client_data
+        self.udp_server.on_data_received = self._on_udp_server_data
     
     def _on_client_data(self, data: bytes):
         """客户端接收到数据"""
@@ -65,6 +72,27 @@ class AppState:
             'hex': bytes_to_hex(data),
             'from': f"{ip}:{port}"
         }, room=self.current_client_sid)
+    
+    def _on_udp_client_data(self, ip: str, port: int, data: bytes):
+        """UDP客户端接收到数据"""
+        formatted = format_received_data(data, show_hex=True)
+        socketio.emit('receive_data', {
+            'data': formatted,
+            'hex': bytes_to_hex(data),
+            'from': f"{ip}:{port}"
+        }, room=self.current_client_sid)
+    
+    def _on_udp_server_data(self, ip: str, port: int, data: bytes):
+        """UDP服务器接收到数据"""
+        formatted = format_received_data(data, show_hex=True)
+        socketio.emit('receive_data', {
+            'data': formatted,
+            'hex': bytes_to_hex(data),
+            'from': f"{ip}:{port}"
+        }, room=self.current_client_sid)
+        # 通知客户端列表更新
+        clients = self.udp_server.get_clients()
+        socketio.emit('udp_clients', {'clients': clients}, room=self.current_client_sid)
 
 # 全局状态实例
 app_state = AppState()
@@ -72,6 +100,14 @@ app_state = AppState()
 @app.route('/')
 def index():
     """主页面"""
+    import os
+    template_path = os.path.join(app.root_path, 'templates', 'index.html')
+    print(f"Loading template from: {template_path}")
+    print(f"Template exists: {os.path.exists(template_path)}")
+    with open(template_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    print(f"Template size: {len(content)} bytes")
+    print(f"Title in template: {content[content.find('<title>'):content.find('</title>')+8]}")
     return render_template('index.html')
 
 @socketio.on('connect')
@@ -86,12 +122,19 @@ def handle_connect():
     # 加载并发送配置
     _load_config()
     emit('connection_history', app_state.connection_history)
+    emit('udp_connection_history', app_state.udp_connection_history)
     emit('send_history', app_state.history_manager.to_list())
     
     # 发送当前连接状态
     emit('connection_status', {
         'connected': app_state.tcp_client.connected,
-        'mode': 'client' if app_state.tcp_client.connected else None
+        'mode': 'client' if app_state.tcp_client.connected else None,
+        'protocol': 'TCP'
+    })
+    emit('udp_connection_status', {
+        'connected': app_state.udp_client.connected,
+        'mode': 'client' if app_state.udp_client.connected else None,
+        'protocol': 'UDP'
     })
 
 @socketio.on('disconnect')
@@ -211,18 +254,116 @@ def handle_update_remark(data):
         _save_config()
         emit('send_history', app_state.history_manager.to_list())
 
+# ===== UDP事件处理 =====
+
+@socketio.on('udp_connect')
+def handle_udp_connect(data):
+    """UDP客户端连接"""
+    ip = data.get('ip')
+    port = data.get('port')
+    local_port = data.get('local_port', 0)
+    broadcast = data.get('broadcast', False)
+    
+    if app_state.udp_client.connect(ip, port, local_port, broadcast):
+        emit('udp_connection_status', {'connected': True, 'mode': 'client', 'target': f"{ip}:{port}"})
+    else:
+        emit('error', {'message': 'UDP连接失败'})
+
+@socketio.on('udp_disconnect')
+def handle_udp_disconnect():
+    """UDP客户端断开"""
+    app_state.udp_client.disconnect()
+    emit('udp_connection_status', {'connected': False, 'mode': 'client'})
+
+@socketio.on('udp_server_start')
+def handle_udp_server_start(data):
+    """启动UDP服务器"""
+    bind_ip = data.get('bind_ip', '0.0.0.0')
+    port = data.get('port')
+    
+    if app_state.udp_server.start(bind_ip, port):
+        emit('udp_server_status', {'running': True, 'address': f"{bind_ip}:{port}"})
+    else:
+        emit('error', {'message': '启动UDP服务器失败'})
+
+@socketio.on('udp_server_stop')
+def handle_udp_server_stop():
+    """停止UDP服务器"""
+    app_state.udp_server.stop()
+    emit('udp_server_status', {'running': False})
+
+@socketio.on('udp_send')
+def handle_udp_send(data):
+    """UDP发送数据"""
+    data_str = data.get('data', '')
+    is_hex = data.get('is_hex', True)
+    target_ip = data.get('target_ip')
+    target_port = data.get('target_port')
+    
+    # 转换数据
+    if is_hex:
+        if not is_valid_hex(data_str):
+            emit('error', {'message': '无效的十六进制数据'})
+            return
+        send_bytes = hex_to_bytes(data_str)
+    else:
+        send_bytes = data_str.encode('utf-8')
+    
+    # 发送
+    success = False
+    if app_state.udp_client.connected:
+        if target_ip and target_port:
+            success = app_state.udp_client.send(send_bytes, target_ip, target_port)
+        else:
+            success = app_state.udp_client.send(send_bytes)
+    elif app_state.udp_server.running:
+        if target_ip and target_port:
+            success = app_state.udp_server.send_to(target_ip, target_port, send_bytes)
+        else:
+            emit('error', {'message': 'UDP服务器模式需要指定目标地址'})
+            return
+    
+    if success:
+        formatted = format_sent_data(send_bytes, show_hex=True)
+        emit('send_success', {'data': formatted})
+    else:
+        emit('error', {'message': '发送失败'})
+
+@socketio.on('save_udp_connection')
+def handle_save_udp_connection(data):
+    """保存UDP连接配置"""
+    ip = data.get('ip')
+    port = data.get('port')
+    
+    conn = (ip, port)
+    if conn in app_state.udp_connection_history:
+        app_state.udp_connection_history.remove(conn)
+    
+    app_state.udp_connection_history.insert(0, conn)
+    if len(app_state.udp_connection_history) > 20:
+        app_state.udp_connection_history = app_state.udp_connection_history[:20]
+    
+    _save_config()
+    emit('udp_connection_history', app_state.udp_connection_history)
+
 def _load_config():
     """加载配置"""
     try:
         if os.path.exists(CONFIG_FILE):
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 config = json.load(f)
-                # 加载连接历史
+                # 加载TCP连接历史
                 saved_history = config.get('connection_history', [])
                 app_state.connection_history = []
                 for item in saved_history:
                     if isinstance(item, (list, tuple)) and len(item) == 2:
                         app_state.connection_history.append((item[0], int(item[1])))
+                # 加载UDP连接历史
+                udp_history = config.get('udp_connection_history', [])
+                app_state.udp_connection_history = []
+                for item in udp_history:
+                    if isinstance(item, (list, tuple)) and len(item) == 2:
+                        app_state.udp_connection_history.append((item[0], int(item[1])))
                 # 加载发送历史
                 send_history = config.get('send_history', [])
                 app_state.history_manager.from_list(send_history)
@@ -234,6 +375,7 @@ def _save_config():
     try:
         config = {
             'connection_history': app_state.connection_history,
+            'udp_connection_history': app_state.udp_connection_history,
             'send_history': app_state.history_manager.to_list()
         }
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:

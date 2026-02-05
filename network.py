@@ -252,3 +252,169 @@ class TCPServer:
         
         if self.on_client_disconnected:
             self.on_client_disconnected(addr[0], addr[1])
+
+
+class UDPClient:
+    """UDP客户端"""
+    def __init__(self):
+        self.socket: Optional[socket.socket] = None
+        self.connected = False
+        self.receive_thread: Optional[threading.Thread] = None
+        self.on_data_received: Optional[Callable[[str, int, bytes], None]] = None
+        self.running = False
+        self.target_addr: Optional[Tuple[str, int]] = None
+    
+    def connect(self, target_ip: str, target_port: int, local_port: int = 0, broadcast: bool = False) -> bool:
+        """创建UDP socket，可指定本地端口和广播模式"""
+        try:
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            
+            # 启用广播
+            if broadcast:
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            
+            # 绑定本地端口
+            if local_port > 0:
+                self.socket.bind(("0.0.0.0", local_port))
+            
+            self.target_addr = (target_ip, target_port)
+            self.connected = True
+            self.running = True
+            
+            # 启动接收线程
+            self.receive_thread = threading.Thread(target=self._receive_loop, daemon=True)
+            self.receive_thread.start()
+            
+            return True
+        except Exception as e:
+            print(f"UDP创建失败: {e}")
+            return False
+    
+    def disconnect(self):
+        """关闭连接"""
+        self.running = False
+        self.connected = False
+        if self.socket:
+            try:
+                self.socket.close()
+            except:
+                pass
+            self.socket = None
+    
+    def send(self, data: bytes, target_ip: str = None, target_port: int = None) -> bool:
+        """发送数据"""
+        if not self.socket:
+            return False
+        try:
+            if target_ip and target_port:
+                self.socket.sendto(data, (target_ip, target_port))
+            elif self.target_addr:
+                self.socket.sendto(data, self.target_addr)
+            else:
+                return False
+            return True
+        except Exception as e:
+            print(f"UDP发送失败: {e}")
+            return False
+    
+    def _receive_loop(self):
+        """接收数据循环"""
+        while self.running:
+            try:
+                self.socket.settimeout(0.5)
+                data, addr = self.socket.recvfrom(4096)
+                if data and self.on_data_received:
+                    self.on_data_received(addr[0], addr[1], data)
+            except socket.timeout:
+                continue
+            except Exception as e:
+                if self.running:
+                    print(f"UDP接收错误: {e}")
+                break
+
+
+class UDPServer:
+    """UDP服务器"""
+    def __init__(self):
+        self.socket: Optional[socket.socket] = None
+        self.running = False
+        self.receive_thread: Optional[threading.Thread] = None
+        self.on_data_received: Optional[Callable[[str, int, bytes], None]] = None
+        self.clients: dict = {}  # 记录客户端地址和最后活跃时间
+    
+    def start(self, bind_ip: str, port: int) -> bool:
+        """启动UDP服务器"""
+        try:
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.socket.bind((bind_ip, port))
+            self.running = True
+            
+            # 启动接收线程
+            self.receive_thread = threading.Thread(target=self._receive_loop, daemon=True)
+            self.receive_thread.start()
+            
+            return True
+        except Exception as e:
+            print(f"启动UDP服务器失败: {e}")
+            return False
+    
+    def stop(self):
+        """停止服务器"""
+        self.running = False
+        if self.socket:
+            try:
+                self.socket.close()
+            except:
+                pass
+            self.socket = None
+    
+    def send_to(self, ip: str, port: int, data: bytes) -> bool:
+        """向指定地址发送数据"""
+        if not self.socket:
+            return False
+        try:
+            self.socket.sendto(data, (ip, port))
+            return True
+        except Exception as e:
+            print(f"UDP发送失败: {e}")
+            return False
+    
+    def broadcast(self, data: bytes, port: int):
+        """广播数据到指定端口"""
+        if not self.socket:
+            return
+        try:
+            # 创建广播socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            sock.sendto(data, ("<broadcast>", port))
+            sock.close()
+        except Exception as e:
+            print(f"UDP广播失败: {e}")
+    
+    def get_clients(self) -> List[Tuple[str, int]]:
+        """获取已连接的客户端列表"""
+        # 清理超时的客户端（5分钟未活跃）
+        current_time = time.time()
+        timeout = 300  # 5分钟
+        self.clients = {addr: t for addr, t in self.clients.items() if current_time - t < timeout}
+        return list(self.clients.keys())
+    
+    def _receive_loop(self):
+        """接收数据循环"""
+        while self.running:
+            try:
+                self.socket.settimeout(0.5)
+                data, addr = self.socket.recvfrom(4096)
+                if data:
+                    # 记录客户端
+                    self.clients[addr] = time.time()
+                    if self.on_data_received:
+                        self.on_data_received(addr[0], addr[1], data)
+            except socket.timeout:
+                continue
+            except Exception as e:
+                if self.running:
+                    print(f"UDP服务器接收错误: {e}")
+                break
