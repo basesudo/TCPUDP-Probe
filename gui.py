@@ -126,8 +126,8 @@ class TCPToolGUI:
         self.conn_history_combo.bind('<<ComboboxSelected>>', self._on_connection_history_select)
         
         ttk.Label(self.client_config_frame, text="目标IP:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5), pady=(5, 0))
-        self.target_ip_entry = ttk.Entry(self.client_config_frame, width=15)
-        self.target_ip_entry.grid(row=1, column=1, padx=(0, 10), pady=(5, 0), sticky=tk.W)
+        self.target_ip_entry = ttk.Entry(self.client_config_frame, width=20)
+        self.target_ip_entry.grid(row=1, column=1, padx=(0, 10), pady=(5, 0), sticky=(tk.W, tk.E))
         self.target_ip_entry.insert(0, "127.0.0.1")
         
         ttk.Label(self.client_config_frame, text="端口:").grid(row=1, column=2, sticky=tk.W, padx=(0, 5), pady=(5, 0))
@@ -135,7 +135,9 @@ class TCPToolGUI:
         self.target_port_entry.grid(row=1, column=3, padx=(0, 10), pady=(5, 0), sticky=tk.W)
         self.target_port_entry.insert(0, "8080")
         
-        ttk.Button(self.client_config_frame, text="保存", command=self._save_connection).grid(row=1, column=4, padx=(0, 10), pady=(5, 0))
+        # 自动保存复选框（默认勾选）
+        self.auto_save_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(self.client_config_frame, text="自动保存", variable=self.auto_save_var).grid(row=1, column=4, padx=(0, 10), pady=(5, 0))
         
         self.connect_btn = ttk.Button(self.client_config_frame, text="连接", command=self._toggle_client_connection)
         self.connect_btn.grid(row=1, column=5, padx=(0, 10), pady=(5, 0))
@@ -201,16 +203,18 @@ class TCPToolGUI:
         history_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(5, 0))
         
         ttk.Label(history_frame, text="历史:").pack(side=tk.LEFT, padx=(0, 5))
-        self.history_combo = ttk.Combobox(history_frame, state="readonly", width=35)
+        self.history_combo = ttk.Combobox(history_frame, state="readonly", width=30)
         self.history_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
         self.history_combo.bind('<<ComboboxSelected>>', self._on_history_select)
-        ttk.Button(history_frame, text="添加备注", command=self._add_remark).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(history_frame, text="备注", width=4, command=self._add_remark).pack(side=tk.LEFT, padx=(0, 5))
         
         send_btn_frame = ttk.Frame(send_frame)
         send_btn_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(5, 0))
         
         ttk.Checkbutton(send_btn_frame, text="十六进制发送", variable=self.send_hex).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(send_btn_frame, text="发送并保存", command=self._send_and_save).pack(side=tk.LEFT, padx=(0, 5))
+        # 保存到历史复选框（默认不勾选）
+        self.save_to_history_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(send_btn_frame, text="保存到历史", variable=self.save_to_history_var).pack(side=tk.LEFT, padx=(0, 10))
         ttk.Button(send_btn_frame, text="发送", command=self._send_data).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(send_btn_frame, text="清空", command=self._clear_send).pack(side=tk.LEFT)
     
@@ -260,7 +264,7 @@ class TCPToolGUI:
             elif protocol == "UDP" and self.udp_server.running:
                 self._toggle_udp_server()
     
-    def _toggle_client_connection(self):
+    def _toggle_client_connection(self, skip_save: bool = False):
         """切换客户端连接状态"""
         if self.tcp_client.connected:
             self.tcp_client.disconnect()
@@ -282,6 +286,9 @@ class TCPToolGUI:
             if self.tcp_client.connect(target_ip, target_port, iface.ip):
                 self.connect_btn.config(text="断开")
                 self.client_status_label.config(text="已连接", foreground="green")
+                # 如果勾选了自动保存且不是跳过保存模式，保存连接
+                if self.auto_save_var.get() and not skip_save:
+                    self._save_connection()
             else:
                 messagebox.showerror("错误", "连接失败")
     
@@ -396,8 +403,6 @@ class TCPToolGUI:
         
         # 保存到配置文件
         self._save_config()
-        
-        messagebox.showinfo("成功", f"已保存{protocol_name}连接: {ip}:{port}")
     
     def _update_connection_history_combo(self):
         """更新连接历史下拉框"""
@@ -472,11 +477,11 @@ class TCPToolGUI:
             self.target_port_entry.delete(0, tk.END)
             self.target_port_entry.insert(0, str(port))
             
-            # 自动连接
+            # 自动连接（跳过保存，因为是从历史记录中选择的）
             if protocol == "TCP":
-                self._toggle_client_connection()
+                self._toggle_client_connection(skip_save=True)
             else:
-                self._toggle_udp_connection()
+                self._toggle_udp_connection(skip_save=True)
     
     def _append_receive(self, data: bytes, from_server: bool = False, client_addr: Optional[Tuple[str, int]] = None):
         """追加接收数据到显示区"""
@@ -490,14 +495,14 @@ class TCPToolGUI:
         self.receive_text.insert(tk.END, formatted)
         self.receive_text.see(tk.END)
     
-    def _send_data(self, save_to_history: bool = False):
+    def _send_data(self):
         """发送数据"""
         data_str = self.send_text.get("1.0", tk.END).strip()
         if not data_str:
             return
         
-        # 如果需要保存到历史
-        if save_to_history:
+        # 如果勾选了保存到历史
+        if self.save_to_history_var.get():
             self.history_manager.add(data_str)
             self._update_history_combo()
             self._save_config()
@@ -654,7 +659,7 @@ class TCPToolGUI:
         if client_addr not in self.client_listbox.get(0, tk.END):
             self.client_listbox.insert(tk.END, client_addr)
     
-    def _toggle_udp_connection(self):
+    def _toggle_udp_connection(self, skip_save: bool = False):
         """切换UDP连接"""
         if self.udp_client.connected:
             self.udp_client.disconnect()
@@ -681,6 +686,9 @@ class TCPToolGUI:
             if self.udp_client.connect(ip, port, local_port, broadcast):
                 self.connect_btn.config(text="断开")
                 self.client_status_label.config(text="已连接", foreground="green")
+                # 如果勾选了自动保存且不是跳过保存模式，保存连接
+                if self.auto_save_var.get() and not skip_save:
+                    self._save_connection()
             else:
                 messagebox.showerror("错误", "UDP连接失败")
     
