@@ -121,9 +121,10 @@ class TCPToolGUI:
         
         # 历史连接选择
         ttk.Label(self.client_config_frame, text="历史:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
-        self.conn_history_combo = ttk.Combobox(self.client_config_frame, state="readonly", width=20)
-        self.conn_history_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
+        self.conn_history_combo = ttk.Combobox(self.client_config_frame, state="readonly", width=35)
+        self.conn_history_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 5))
         self.conn_history_combo.bind('<<ComboboxSelected>>', self._on_connection_history_select)
+        ttk.Button(self.client_config_frame, text="备注", width=4, command=self._add_connection_remark).grid(row=0, column=2, padx=(0, 10))
         
         ttk.Label(self.client_config_frame, text="目标IP:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5), pady=(5, 0))
         self.target_ip_entry = ttk.Entry(self.client_config_frame, width=20)
@@ -213,7 +214,7 @@ class TCPToolGUI:
         
         ttk.Checkbutton(send_btn_frame, text="十六进制发送", variable=self.send_hex).pack(side=tk.LEFT, padx=(0, 10))
         # 保存到历史复选框（默认不勾选）
-        self.save_to_history_var = tk.BooleanVar(value=False)
+        self.save_to_history_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(send_btn_frame, text="保存到历史", variable=self.save_to_history_var).pack(side=tk.LEFT, padx=(0, 10))
         ttk.Button(send_btn_frame, text="发送", command=self._send_data).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(send_btn_frame, text="清空", command=self._clear_send).pack(side=tk.LEFT)
@@ -385,19 +386,25 @@ class TCPToolGUI:
         # 根据协议选择历史列表
         is_udp = self.protocol_mode.get() == "UDP"
         history_list = self.udp_connection_history if is_udp else self.connection_history
-        protocol_name = "UDP" if is_udp else "TCP"
         
-        # 检查是否已存在
-        conn = (ip, port)
-        if conn in history_list:
-            history_list.remove(conn)
+        # 检查是否已存在（按IP和端口匹配）
+        existing_idx = -1
+        for i, item in enumerate(history_list):
+            if item["ip"] == ip and item["port"] == port:
+                existing_idx = i
+                break
         
-        # 添加到历史开头
-        history_list.insert(0, conn)
+        if existing_idx >= 0:
+            # 如果已存在，移到开头（保留原有备注）
+            existing_item = history_list.pop(existing_idx)
+            history_list.insert(0, existing_item)
+        else:
+            # 新连接，添加到开头
+            history_list.insert(0, {"ip": ip, "port": port, "remark": ""})
         
         # 限制历史数量
         if len(history_list) > 20:
-            history_list = history_list[:20]
+            history_list[:] = history_list[:20]
         
         self._update_connection_history_combo()
         
@@ -408,7 +415,12 @@ class TCPToolGUI:
         """更新连接历史下拉框"""
         is_udp = self.protocol_mode.get() == "UDP"
         history_list = self.udp_connection_history if is_udp else self.connection_history
-        history_names = [f"{ip}:{port}" for ip, port in history_list]
+        history_names = []
+        for item in history_list:
+            if item.get("remark"):
+                history_names.append(f"[{item['remark']}] {item['ip']}:{item['port']}")
+            else:
+                history_names.append(f"{item['ip']}:{item['port']}")
         self.conn_history_combo['values'] = history_names
     
     def _load_config(self):
@@ -417,18 +429,42 @@ class TCPToolGUI:
             if os.path.exists(CONFIG_FILE):
                 with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                     config = json.load(f)
-                    # 加载TCP连接历史
+                    # 加载TCP连接历史（支持新旧两种格式）
                     saved_history = config.get('connection_history', [])
                     self.connection_history = []
                     for item in saved_history:
-                        if isinstance(item, (list, tuple)) and len(item) == 2:
-                            self.connection_history.append((item[0], int(item[1])))
-                    # 加载UDP连接历史
+                        if isinstance(item, dict):
+                            # 新格式: {"ip": ip, "port": port, "remark": remark}
+                            self.connection_history.append({
+                                "ip": item["ip"],
+                                "port": int(item["port"]),
+                                "remark": item.get("remark", "")
+                            })
+                        elif isinstance(item, (list, tuple)) and len(item) == 2:
+                            # 旧格式: [ip, port]
+                            self.connection_history.append({
+                                "ip": item[0],
+                                "port": int(item[1]),
+                                "remark": ""
+                            })
+                    # 加载UDP连接历史（支持新旧两种格式）
                     udp_history = config.get('udp_connection_history', [])
                     self.udp_connection_history = []
                     for item in udp_history:
-                        if isinstance(item, (list, tuple)) and len(item) == 2:
-                            self.udp_connection_history.append((item[0], int(item[1])))
+                        if isinstance(item, dict):
+                            # 新格式
+                            self.udp_connection_history.append({
+                                "ip": item["ip"],
+                                "port": int(item["port"]),
+                                "remark": item.get("remark", "")
+                            })
+                        elif isinstance(item, (list, tuple)) and len(item) == 2:
+                            # 旧格式
+                            self.udp_connection_history.append({
+                                "ip": item[0],
+                                "port": int(item[1]),
+                                "remark": ""
+                            })
                     # 加载发送历史
                     send_history = config.get('send_history', [])
                     self.history_manager.from_list(send_history)
@@ -454,7 +490,9 @@ class TCPToolGUI:
         history_list = self.udp_connection_history if self.protocol_mode.get() == "UDP" else self.connection_history
         
         if idx >= 0 and idx < len(history_list):
-            ip, port = history_list[idx]
+            item = history_list[idx]
+            ip = item["ip"]
+            port = item["port"]
             
             # 如果当前已连接，弹出确认框
             protocol = self.protocol_mode.get()
@@ -482,6 +520,58 @@ class TCPToolGUI:
                 self._toggle_client_connection(skip_save=True)
             else:
                 self._toggle_udp_connection(skip_save=True)
+    
+    def _add_connection_remark(self):
+        """为连接历史添加备注"""
+        idx = self.conn_history_combo.current()
+        if idx < 0:
+            messagebox.showwarning("提示", "请先选择一条历史记录")
+            return
+        
+        history_list = self.udp_connection_history if self.protocol_mode.get() == "UDP" else self.connection_history
+        if idx >= len(history_list):
+            return
+        
+        item = history_list[idx]
+        current_remark = item.get("remark", "")
+        
+        # 弹出输入对话框
+        dialog = tk.Toplevel(self.root)
+        dialog.title("添加备注")
+        dialog.geometry("300x120")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # 居中显示
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() - dialog.winfo_width()) // 2
+        y = (dialog.winfo_screenheight() - dialog.winfo_height()) // 2
+        dialog.geometry(f"+{x}+{y}")
+        
+        ttk.Label(dialog, text=f"为 {item['ip']}:{item['port']} 添加备注:").pack(pady=(10, 5))
+        
+        remark_entry = ttk.Entry(dialog, width=35)
+        remark_entry.pack(pady=5)
+        remark_entry.insert(0, current_remark)
+        remark_entry.select_range(0, tk.END)
+        remark_entry.focus()
+        
+        def save_remark():
+            remark = remark_entry.get().strip()
+            item["remark"] = remark
+            self._update_connection_history_combo()
+            self._save_config()
+            dialog.destroy()
+        
+        def on_enter(event):
+            save_remark()
+        
+        remark_entry.bind('<Return>', on_enter)
+        
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(pady=10)
+        ttk.Button(btn_frame, text="确定", command=save_remark).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="取消", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
     
     def _append_receive(self, data: bytes, from_server: bool = False, client_addr: Optional[Tuple[str, int]] = None):
         """追加接收数据到显示区"""
