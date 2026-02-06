@@ -300,6 +300,8 @@
                 </div>
                 <textarea id="receiveArea" readonly placeholder="接收到的数据将显示在这里..."></textarea>
                 <div class="form-row">
+                    <button id="pauseBtn" onclick="toggleReceivePause()">暂停接收</button>
+                    <span id="pauseBadge" class="badge" style="display: none; margin-left: 10px; background: #f59e0b; color: white;">已暂停 (0 条)</span>
                     <button onclick="clearReceive()">清空</button>
                 </div>
             </div>
@@ -427,8 +429,19 @@
             }
         });
         
+        // 接收暂停状态
+        let isReceivePaused = false;
+        let pausedDataBuffer = [];
+        
         // 接收数据
         socket.on('receive_data', function(data) {
+            if (isReceivePaused) {
+                // 如果暂停，将数据存入缓冲区
+                pausedDataBuffer.push(data);
+                updatePauseBadge();
+                return;
+            }
+            
             const area = document.getElementById('receiveArea');
             let text = data.data;
             if (data.from) {
@@ -437,6 +450,43 @@
             area.value += text;
             area.scrollTop = area.scrollHeight;
         });
+        
+        // 切换接收暂停状态
+        function toggleReceivePause() {
+            isReceivePaused = !isReceivePaused;
+            const btn = document.getElementById('pauseBtn');
+            const badge = document.getElementById('pauseBadge');
+            
+            if (isReceivePaused) {
+                btn.textContent = '继续接收';
+                btn.className = 'secondary';
+                badge.style.display = 'inline-block';
+                updatePauseBadge();
+            } else {
+                btn.textContent = '暂停接收';
+                btn.className = '';
+                badge.style.display = 'none';
+                // 恢复显示缓冲的数据
+                const area = document.getElementById('receiveArea');
+                pausedDataBuffer.forEach(function(data) {
+                    let text = data.data;
+                    if (data.from) {
+                        text = `[来自 ${data.from}]\n${text}`;
+                    }
+                    area.value += text;
+                });
+                area.scrollTop = area.scrollHeight;
+                pausedDataBuffer = [];
+            }
+        }
+        
+        // 更新暂停徽章
+        function updatePauseBadge() {
+            const badge = document.getElementById('pauseBadge');
+            if (badge && isReceivePaused) {
+                badge.textContent = `已暂停 (${pausedDataBuffer.length} 条)`;
+            }
+        }
         
         // 发送成功
         socket.on('send_success', function(data) {

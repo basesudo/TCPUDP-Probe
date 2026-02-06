@@ -48,6 +48,10 @@ class TCPToolGUI:
         self.show_binary = tk.BooleanVar(value=False)  # 二进制显示
         self.send_hex = tk.BooleanVar(value=True)
         self.selected_client: Optional[Tuple[str, int]] = None
+        
+        # 接收暂停状态
+        self.is_receive_paused = False
+        self.paused_data_buffer: list[tuple] = []  # 暂停时缓冲的数据
         self.history_manager = HistoryManager()
         self.connection_history: list[tuple[str, int]] = []  # 连接历史 (ip, port)
         self.udp_connection_history: list[tuple[str, int]] = []  # UDP连接历史
@@ -190,6 +194,15 @@ class TCPToolGUI:
         
         ttk.Checkbutton(receive_btn_frame, text="十六进制显示", variable=self.show_hex).pack(side=tk.LEFT, padx=(0, 10))
         ttk.Checkbutton(receive_btn_frame, text="二进制显示", variable=self.show_binary).pack(side=tk.LEFT, padx=(0, 10))
+        
+        # 暂停接收按钮
+        self.pause_btn = ttk.Button(receive_btn_frame, text="暂停接收", command=self._toggle_receive_pause)
+        self.pause_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
+        # 暂停状态标签
+        self.pause_status_label = ttk.Label(receive_btn_frame, text="", foreground="orange")
+        self.pause_status_label.pack(side=tk.LEFT, padx=(0, 10))
+        
         ttk.Button(receive_btn_frame, text="清空", command=self._clear_receive).pack(side=tk.LEFT)
         ttk.Button(receive_btn_frame, text="保存", command=self._save_receive).pack(side=tk.LEFT, padx=(5, 0))
         
@@ -597,8 +610,36 @@ class TCPToolGUI:
             self.target_ip_entry.delete(0, tk.END)
             self.target_port_entry.delete(0, tk.END)
     
-    def _append_receive(self, data: bytes, from_server: bool = False, client_addr: Optional[Tuple[str, int]] = None):
-        """追加接收数据到显示区"""
+    def _toggle_receive_pause(self):
+        """切换接收暂停状态"""
+        self.is_receive_paused = not self.is_receive_paused
+        
+        if self.is_receive_paused:
+            self.pause_btn.config(text="继续接收")
+            self._update_pause_status()
+        else:
+            self.pause_btn.config(text="暂停接收")
+            self.pause_status_label.config(text="")
+            # 显示缓冲的数据
+            self._flush_paused_data()
+    
+    def _update_pause_status(self):
+        """更新暂停状态显示"""
+        if self.is_receive_paused:
+            count = len(self.paused_data_buffer)
+            self.pause_status_label.config(text=f"已暂停 ({count} 条)")
+            # 每500ms更新一次计数
+            if self.is_receive_paused:
+                self.root.after(500, self._update_pause_status)
+    
+    def _flush_paused_data(self):
+        """将缓冲的数据显示到文本区"""
+        for data, from_server, client_addr in self.paused_data_buffer:
+            self._display_received_data(data, from_server, client_addr)
+        self.paused_data_buffer.clear()
+    
+    def _display_received_data(self, data: bytes, from_server: bool = False, client_addr: Optional[Tuple[str, int]] = None):
+        """实际显示接收数据"""
         show_hex = self.show_hex.get()
         
         if from_server and client_addr:
@@ -608,6 +649,15 @@ class TCPToolGUI:
         formatted = format_received_data(data, show_hex, self.show_binary.get())
         self.receive_text.insert(tk.END, formatted)
         self.receive_text.see(tk.END)
+    
+    def _append_receive(self, data: bytes, from_server: bool = False, client_addr: Optional[Tuple[str, int]] = None):
+        """追加接收数据到显示区"""
+        if self.is_receive_paused:
+            # 如果暂停，将数据存入缓冲区
+            self.paused_data_buffer.append((data, from_server, client_addr))
+            return
+        
+        self._display_received_data(data, from_server, client_addr)
     
     def _send_data(self):
         """发送数据"""
