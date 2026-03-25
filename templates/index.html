@@ -632,6 +632,20 @@
             }
         }
         
+        // 判断是否为广播地址
+        function isBroadcastAddress(ip) {
+            if (!ip) return false;
+            // 255.255.255.255 是有限广播地址
+            if (ip === '255.255.255.255') return true;
+            // x.x.x.255 是子网广播地址
+            const parts = ip.split('.');
+            if (parts.length === 4) {
+                const lastOctet = parseInt(parts[3]);
+                return !isNaN(lastOctet) && lastOctet === 255;
+            }
+            return false;
+        }
+        
         // 切换连接
         function toggleConnection() {
             if (currentProtocol === 'UDP') {
@@ -647,7 +661,9 @@
                         return;
                     }
                     
-                    socket.emit('udp_connect', {ip: ip, port: port, local_port: 0, broadcast: false});
+                    // 自动检测广播地址
+                    const broadcast = isBroadcastAddress(ip);
+                    socket.emit('udp_connect', {ip: ip, port: port, local_port: 0, broadcast: broadcast});
                 }
             } else {
                 // TCP连接

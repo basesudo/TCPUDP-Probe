@@ -271,11 +271,19 @@ class UDPClient:
             
             # 启用广播
             if broadcast:
+                # 启用广播选项
                 self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                # 允许重用地址（对广播很重要）
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                # Windows特定：禁用发送缓冲区限制
+                try:
+                    self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65535)
+                except:
+                    pass
             
-            # 绑定本地端口
-            if local_port > 0:
-                self.socket.bind(("0.0.0.0", local_port))
+            # 绑定本地端口（即使是0也要绑定，让系统分配端口）
+            # 对于广播，绑定到特定端口有助于接收回复
+            self.socket.bind(("0.0.0.0", local_port))
             
             self.target_addr = (target_ip, target_port)
             self.connected = True
@@ -304,15 +312,45 @@ class UDPClient:
     def send(self, data: bytes, target_ip: str = None, target_port: int = None) -> bool:
         """发送数据"""
         if not self.socket:
+            print("UDP发送失败: socket未创建")
             return False
         try:
+            target = None
             if target_ip and target_port:
-                self.socket.sendto(data, (target_ip, target_port))
+                target = (target_ip, target_port)
             elif self.target_addr:
-                self.socket.sendto(data, self.target_addr)
+                target = self.target_addr
             else:
+                print("UDP发送失败: 未指定目标地址")
                 return False
+            
+            # 检查是否是广播地址
+            is_broadcast = False
+            if target[0]:
+                parts = target[0].split('.')
+                if len(parts) == 4:
+                    try:
+                        if parts[3] == '255' or target[0] == '255.255.255.255':
+                            is_broadcast = True
+                    except:
+                        pass
+            
+            print(f"UDP发送数据到 {target} (广播: {is_broadcast}): {data[:50]}...")
+            
+            # 对于广播地址，确保socket已启用广播
+            if is_broadcast:
+                try:
+                    self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                except:
+                    pass
+            
+            bytes_sent = self.socket.sendto(data, target)
+            print(f"UDP发送成功，发送了 {bytes_sent} 字节")
             return True
+        except PermissionError as e:
+            print(f"UDP发送失败 (权限错误): {e}")
+            print("提示: 发送广播数据可能需要管理员权限，请尝试以管理员身份运行程序")
+            return False
         except Exception as e:
             print(f"UDP发送失败: {e}")
             return False

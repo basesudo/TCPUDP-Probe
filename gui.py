@@ -230,6 +230,9 @@ class TCPToolGUI:
         send_btn_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(5, 0))
         
         ttk.Checkbutton(send_btn_frame, text="十六进制发送", variable=self.send_hex).pack(side=tk.LEFT, padx=(0, 10))
+        # 自动添加换行符选项
+        self.add_newline_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(send_btn_frame, text="添加\\n", variable=self.add_newline_var).pack(side=tk.LEFT, padx=(0, 10))
         # 保存到历史复选框（默认不勾选）
         self.save_to_history_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(send_btn_frame, text="保存到历史", variable=self.save_to_history_var).pack(side=tk.LEFT, padx=(0, 10))
@@ -678,6 +681,9 @@ class TCPToolGUI:
                 return
             data = hex_to_bytes(data_str)
         else:
+            # 检查是否需要添加换行符
+            if self.add_newline_var.get():
+                data_str += '\n'
             data = data_str.encode('utf-8')
         
         # 发送
@@ -837,6 +843,23 @@ class TCPToolGUI:
         if client_addr not in self.client_listbox.get(0, tk.END):
             self.client_listbox.insert(tk.END, client_addr)
     
+    def _is_broadcast_address(self, ip: str) -> bool:
+        """判断是否为广播地址"""
+        if not ip:
+            return False
+        # 255.255.255.255 是有限广播地址
+        if ip == '255.255.255.255':
+            return True
+        # x.x.x.255 是子网广播地址
+        parts = ip.split('.')
+        if len(parts) == 4:
+            try:
+                last_octet = int(parts[3])
+                return last_octet == 255
+            except ValueError:
+                return False
+        return False
+    
     def _toggle_udp_connection(self, skip_save: bool = False):
         """切换UDP连接"""
         if self.udp_client.connected:
@@ -859,7 +882,8 @@ class TCPToolGUI:
             
             # 获取本地端口和广播选项
             local_port = 0
-            broadcast = False
+            # 自动检测广播地址
+            broadcast = self._is_broadcast_address(ip)
             
             if self.udp_client.connect(ip, port, local_port, broadcast):
                 self.connect_btn.config(text="断开")

@@ -31,7 +31,7 @@ def build_gui():
     print("="*50 + "\n")
     
     cmd = [
-        'pyinstaller',
+        sys.executable, '-m', 'PyInstaller',
         '--name=TCP调试工具-桌面版',
         '--onefile',
         '--windowed',
@@ -55,7 +55,7 @@ def build_web():
     print("="*50 + "\n")
     
     cmd = [
-        'pyinstaller',
+        sys.executable, '-m', 'PyInstaller',
         '--name=TCP调试工具-Web版',
         '--onefile',
         '--console',
